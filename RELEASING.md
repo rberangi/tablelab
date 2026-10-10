@@ -50,3 +50,18 @@ excluded. The wheel contains the importable package and its license/metadata.
 
 Building does not publish a release. Uploading artifacts to PyPI and creating
 repository tags are separate release actions.
+
+## Publish through GitHub Actions
+
+Configure the PyPI Trusted Publisher with owner `rberangi`, repository `tablelab`,
+and workflow filename `python-package.yml`. Leave the environment blank to match
+this workflow, which does not declare a GitHub environment. No API token is needed.
+
+Commit and push `.github/workflows/python-package.yml`. On GitHub, open **Actions →
+Publish TableLab to PyPI → Run workflow**, select `main`, and run it. This builds,
+tests, and publishes the version currently in the source. Publishing a GitHub
+release also triggers the workflow when its tag contains this workflow; its tag
+must match the package version, such as `v0.4.0`.
+
+Run publishing once per version. If that version already exists on PyPI, increment
+the version and prepare the next release first; PyPI does not allow overwriting files.
