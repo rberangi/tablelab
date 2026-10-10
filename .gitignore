@@ -1,0 +1,42 @@
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# R
+.Rhistory
+
+# Generated run outputs (timestamped fit results are reproducible; keep them local)
+outputs/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+.uv-cache/
+
+# Test cache
+.pytest_cache/
+
+# Kept locally, not part of the published package
+archive/
+artifacts/
+INVENTORY.md
+requirements.txt
+.Rhistory
+article/
