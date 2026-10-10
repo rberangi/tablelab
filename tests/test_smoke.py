@@ -284,15 +284,15 @@ def test_gui_notebook_is_a_small_runnable_launcher():
     import json
     from pathlib import Path
 
-    notebook = Path(__file__).parents[1] / "examples" / "chart_gui.ipynb"
+    notebook = Path(__file__).parents[1] / "examples" / "tablelab_queries.ipynb"
     document = json.loads(notebook.read_text(encoding="utf-8"))
     code = "\n".join(
         "".join(cell.get("source", []))
         for cell in document["cells"]
         if cell["cell_type"] == "code"
     )
-    assert "from tablelab import main" in code
-    assert "app = main()" in code
+    assert "from tablelab import query_main" in code
+    assert "app = query_main()" in code
 
 
 def test_app_lists_text_columns_and_counts_them(tmp_path):

@@ -160,7 +160,8 @@ def step_code(df, step):
         lines = []
         available = list(df.columns)
         if step['calculations']:
-            lines.append('source = source.copy()')
+            # A shallow copy is enough to add columns without copying the existing data.
+            lines.append('source = source.copy(deep=False)')
         for name, expression in step['calculations']:
             lines.append(f'source[{name!r}] = {arithmetic_code(expression, available)}')
             available.append(name)
@@ -171,9 +172,10 @@ def step_code(df, step):
         if step['order']:
             lines.append(f"result = result.sort_values({step['order']!r}, ascending={step['ascending']!r}, "
                          "kind='stable', na_position='last')")
-        start = step['offset']
-        stop = start + step['limit'] if step['limit'] else ''
-        lines.append(f'result = result.iloc[{start}:{stop}].copy()')
+        if step['offset'] or step['limit']:
+            start = step['offset']
+            stop = start + step['limit'] if step['limit'] else ''
+            lines.append(f'result = result.iloc[{start}:{stop}].copy()')
         if step['aliases']:
             lines.append(f"result = result.rename(columns={step['aliases']!r})")
         return lines

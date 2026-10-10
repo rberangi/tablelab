@@ -26,6 +26,7 @@ dependencies = [
     "matplotlib>=3.9",
     "ipywidgets>=8.0",
     "certifi>=2024.2.2",
+    "sqlglot>=25",
 ]
 
 [project.optional-dependencies]
@@ -53,7 +54,7 @@ packages = ["src/tablelab"]
 [tool.hatch.build.targets.sdist]
 include = [
     "src/tablelab", "tests", "pyproject.toml", "README.md", "LICENSE",
-    "CHANGELOG.md", "RELEASING.md", "examples/chart_gui.ipynb",
+    "CHANGELOG.md", "RELEASING.md",
     "examples/tablelab_queries.ipynb", "examples/data/*.csv",
 ]
 exclude = ["**/__pycache__", "**/*.pyc", "**/.ipynb_checkpoints", "**/.DS_Store"]

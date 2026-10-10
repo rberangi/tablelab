@@ -48,6 +48,7 @@ def test_scatter_sampling_nullable_and_empty(inspector):
                           'y': pd.Series(range(6000), dtype='Float64')})
     frame.loc[0, 'y'] = pd.NA
     inspector.set_table(frame)
+    inspector.show_all_btn.click()
     inspector.set_active(True)
     assert not inspector.relationship_chart.outputs
     inspector.compare.value = True
@@ -157,6 +158,7 @@ def test_two_curves_allow_nonoverlapping_values_and_limit_samples(inspector):
     inspector.comparison_view.value = 'samples'
     assert len(inspector._relationship_fig.axes[0].lines) == 2
     inspector.set_table(pd.DataFrame({'a': np.arange(6000.), 'b': np.arange(6000.) * 2}))
+    inspector.show_all_btn.click()
     ax = inspector._relationship_fig.axes[0]
     assert len(ax.lines[0].get_xdata()) == 5000
     assert ax.lines[0].get_xdata()[0] == 1 and ax.lines[0].get_xdata()[-1] == 6000
@@ -165,3 +167,27 @@ def test_two_curves_allow_nonoverlapping_values_and_limit_samples(inspector):
     assert not inspector.chart.outputs and 'No finite values' in inspector.relationship_info.value
     inspector.set_table(pd.DataFrame({'a': pd.Series(dtype=float), 'b': pd.Series(dtype=float)}))
     assert not inspector.chart.outputs and 'No samples' in inspector.relationship_info.value
+
+
+def test_inspection_range_limits_series_pairs_and_sample_positions(inspector):
+    frame = pd.DataFrame({'a': np.arange(150.), 'b': np.arange(150.) * 2}, index=[7] * 150)
+    original = frame.copy(deep=True)
+    inspector.set_table(frame)
+    assert len(inspector.series()[0]) == 100
+    inspector.start_row.value = 20
+    inspector.end_row.value = 25
+    pd.testing.assert_series_equal(inspector.series()[0], frame['a'].iloc[19:25])
+    inspector.compare.value = True
+    inspector.set_active(True)
+    assert len(inspector._relationship_fig.axes[0].collections[0].get_offsets()) == 6
+    inspector.comparison_view.value = 'samples'
+    assert list(inspector._relationship_fig.axes[0].lines[0].get_xdata()) == list(range(20, 26))
+    inspector.show_all_btn.click()
+    assert len(inspector.series()[0]) == 150
+    assert inspector.df is frame
+    pd.testing.assert_frame_equal(frame, original)
+    inspector.start_row.value = 90
+    inspector.end_row.value = 30
+    assert inspector.start_row.value == inspector.end_row.value == 30
+    inspector.set_table(frame.iloc[:2])
+    assert inspector.start_row.value == 1 and inspector.end_row.value == 2

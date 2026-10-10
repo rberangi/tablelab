@@ -251,3 +251,17 @@ def test_pipeline_buttons_and_invalid_draft_do_not_mutate_saved_steps():
     assert app.pipeline_steps[0]['columns'] == ['id']
     app.cancel_step_edit()
     assert app.df.id.tolist() == [1]
+
+
+def test_select_code_avoids_full_copies_and_keeps_input_unchanged():
+    from tablelab.pipeline import execute_step, step_code
+    frame = pd.DataFrame({'a': [1., 2.], 'b': [3., 4.]})
+    original = frame.copy()
+    step = dict(operation=0, columns=['a'], calculations=[('c', 'a + b')], aliases={},
+                order=[], distinct=False, ascending=True, limit=0, offset=0)
+    code = '\n'.join(step_code(frame, step))
+    assert 'copy(deep=False)' in code and 'iloc' not in code
+    namespace = {'source': frame, 'pd': pd}
+    exec(code, namespace)
+    pd.testing.assert_frame_equal(namespace['result'], execute_step(frame, step))
+    pd.testing.assert_frame_equal(frame, original)

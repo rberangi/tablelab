@@ -28,7 +28,7 @@ def test_cli_version_does_not_require_a_file():
 
 def test_release_notebooks_have_no_local_paths_or_saved_outputs():
     root = Path(__file__).parents[1]
-    for name in ('chart_gui', 'tablelab_queries'):
+    for name in ('tablelab_queries',):
         notebook = json.loads((root / 'examples' / (name + '.ipynb')).read_text())
         for cell in notebook['cells']:
             source = ''.join(cell['source'])

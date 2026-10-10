@@ -89,14 +89,16 @@ def arithmetic_sql(expression, columns):
     return visit(ast.parse(code, mode='eval').body)
 
 
-def filter_sql(frame, step):
+def filter_sql(frame, step, spark=True):
     conditions = []
     for column, operator, value in step['conditions']:
         ref = identifier(column)
         if operator in {'missing', 'present'}:
             condition = f'{ref} IS ' + ('NULL' if operator == 'missing' else 'NOT NULL')
         elif operator == 'contains':
-            condition = f'INSTR(CAST({ref} AS STRING), {literal(value)}) > 0'
+            text = ref if spark_type(frame[column]) == 'STRING' else f'CAST({ref} AS STRING)'
+            # Spark pushes CONTAINS on a plain column down to file sources; databases lack it.
+            condition = f'CONTAINS({text}, {literal(value)})' if spark else f'INSTR({text}, {literal(value)}) > 0'
         else:
             scalar = _fixed_value(frame[column], value)
             symbol = {'eq': '=', 'ne': '<>', 'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<='}[operator]
@@ -105,7 +107,9 @@ def filter_sql(frame, step):
             if operator == 'ne' and (not isinstance(frame[column].dtype, pd.api.extensions.ExtensionDtype)
                                      or getattr(frame[column].dtype, 'na_value', pd.NA) is not pd.NA):
                 condition = f'({condition} OR {ref} IS NULL)'
-        conditions.append(f'COALESCE(({condition}), FALSE)')
+        # Only AND/OR combine conditions, so a NULL result filters out the row exactly as
+        # pandas' False does. Avoiding COALESCE keeps predicates eligible for pushdown.
+        conditions.append(f'({condition})')
     tree = condition_tree(step['grouping'], len(conditions), step['mode'])
     def combine(node):
         if isinstance(node, ast.Constant):
@@ -132,6 +136,22 @@ def join_projection(frame, step):
     return columns
 
 
+def join_condition(frame, step, target):
+    conditions = []
+    for left, right in zip(step['left_keys'], step['right_keys']):
+        left_ref, right_ref = f'l.{identifier(left)}', f'r.{identifier(right)}'
+        if target == 'postgres':
+            # PostgreSQL cannot hash or merge IS NOT DISTINCT FROM, so it would nested-loop.
+            # Equal fill values plus equal NULL flags match the same rows with plain equalities.
+            fill = {'BOOLEAN': 'FALSE', 'STRING': "''",
+                    'TIMESTAMP': "CAST('1970-01-01' AS TIMESTAMP)"}.get(spark_type(frame[left]), '0')
+            conditions.append(f'COALESCE({left_ref}, {fill}) = COALESCE({right_ref}, {fill}) '
+                              f'AND ({left_ref} IS NULL) = ({right_ref} IS NULL)')
+        else:
+            conditions.append(f'{left_ref} <=> {right_ref}')
+    return ' AND '.join(conditions)
+
+
 def aggregate_sql(frame, step):
     keys, aggregate, column = step['keys'], step['aggregate'], step['column']
     if not keys:
@@ -154,13 +174,15 @@ def aggregate_sql(frame, step):
 
 
 def missing_projection(frame, step):
+    """Fill expressions; median fills read source `s` cross-joined with medians `m`."""
     validate_missing(frame, step['columns'], step['action'])
+    median = step['action'] == 'median'
     expressions = []
     for column in frame.columns:
-        expression = identifier(column)
+        expression = ('s.' if median else '') + identifier(column)
         if column in step['columns']:
-            if step['action'] == 'median':
-                expression = f'COALESCE(CAST({expression} AS DOUBLE), MEDIAN(CAST({expression} AS DOUBLE)) OVER ())'
+            if median:
+                expression = f'COALESCE(CAST({expression} AS DOUBLE), m.{identifier(column)})'
             elif step['action'] == 'fixed' and frame[column].isna().any():
                 scalar = _fixed_value(frame[column], step['value'])
                 if pd.isna(scalar):
@@ -170,10 +192,41 @@ def missing_projection(frame, step):
     return expressions
 
 
-def inspect_expressions(column):
-    missing = f'(COUNT(*) - COUNT({identifier(column)}))'
-    return [(literal(column), 'column'), (missing, 'missing_count'),
-            (f'CASE WHEN COUNT(*) = 0 THEN 0.0 ELSE 100.0 * {missing} / COUNT(*) END', 'missing_percent')]
+def median_expressions(step):
+    # One global aggregate instead of MEDIAN() OVER (), which moves every row to one partition.
+    return [(f'MEDIAN(CAST({identifier(column)} AS DOUBLE))', column) for column in step['columns']]
+
+
+def inspect_counts(columns):
+    """Single-pass aggregate shared by every inspected column."""
+    return [('COUNT(*)', 'row_total')] + [(f'COUNT({identifier(column)})', f'present_{index}')
+                                          for index, column in enumerate(columns)]
+
+
+def inspect_rows(columns):
+    rows = []
+    for index, column in enumerate(columns):
+        missing = f'(`row_total` - `present_{index}`)'
+        rows.append([literal(str(column)), missing,
+                     f'CASE WHEN `row_total` = 0 THEN 0.0 ELSE 100.0 * {missing} / `row_total` END'])
+    return rows
+
+
+INSPECT_NAMES = ('column', 'missing_count', 'missing_percent')
+
+
+def select_list(expressions):
+    return ', '.join(f'{expression} AS {identifier(name)}' for expression, name in expressions)
+
+
+def has_line_breaks(frame):
+    for column in frame.columns:
+        series = frame[column]
+        if isinstance(series.dtype, pd.CategoricalDtype):
+            series = pd.Series(series.cat.categories)
+        if spark_type(series) == 'STRING' and series.dropna().astype(str).str.contains('[\r\n]').any():
+            return True
+    return False
 
 
 def source_spec(entry):
@@ -212,6 +265,11 @@ def source_spec(entry):
         notes.append(f'Export {original!r} to {path!r} as CSV (index=False) before running; its original format/reader is not native here.')
     if format_name == 'csv' and not options:
         options = {'header': 'true', 'sep': ',', 'mode': 'FAILFAST', 'nullValue': '', 'multiLine': 'true', 'escape': '"'}
+    if format_name == 'csv' and not has_line_breaks(frame):
+        # multiLine makes every file a single unsplittable task, so enable it only when needed.
+        del options['multiLine']
+    elif format_name == 'csv':
+        notes.append('Text values contain line breaks, so multiLine is on; Spark reads each CSV file in one task.')
     if not os.path.isabs(path) and '://' not in path:
         notes.append('Place the input file in the working directory, or edit its path.')
     projection = []
@@ -291,18 +349,20 @@ def pyspark_step(frame, step):
     if step['action'] == 'drop':
         return [f"result = source.dropna(how={step['how']!r}, subset={[str(column) for column in step['columns']]!r})"]
     if step['action'] == 'inspect':
-        lines = []
-        for index, column in enumerate(step['columns']):
-            expressions = ', '.join(repr(expression + ' AS ' + identifier(name)) for expression, name in inspect_expressions(column))
-            lines.append(('result = ' if index == 0 else 'part = ') + f'source.selectExpr({expressions})')
-            if index:
-                lines.append('result = result.unionByName(part)')
-        return lines
+        counts = ', '.join(repr(expression + ' AS ' + identifier(name)) for expression, name in inspect_counts(step['columns']))
+        values = ', '.join(value for row in inspect_rows(step['columns']) for value in row)
+        stack = f'STACK({len(step["columns"])}, {values}) AS ({", ".join(map(identifier, INSPECT_NAMES))})'
+        return [f'counts = source.selectExpr({counts})', f'result = counts.selectExpr({stack!r})']
     expressions = ', '.join(repr(expression + ' AS ' + identifier(name)) for expression, name in missing_projection(frame, step))
+    if step['action'] == 'median':
+        medians = ', '.join(repr(expression + ' AS ' + identifier(name)) for expression, name in median_expressions(step))
+        return [f'medians = source.selectExpr({medians})',
+                f"result = source.alias('s').crossJoin(F.broadcast(medians).alias('m')).selectExpr({expressions})"]
     return [f'result = source.selectExpr({expressions})']
 
 
-def sql_step(frame, step, source, right=None):
+def sql_step(frame, step, source, right=None, target='sql', ctes=None, name='tablelab_step'):
+    """Return one step's query; inspect appends a helper CTE named after `name` to `ctes`."""
     validate_step(frame, step)
     check_names(frame.columns)
     operation = step['operation']
@@ -333,12 +393,11 @@ def sql_step(frame, step, source, right=None):
         return query
     if operation == 1:
         expressions = ', '.join(expression + ' AS ' + identifier(name) for expression, name in join_projection(frame, step))
-        conditions = ' AND '.join(f'l.{identifier(left)} <=> r.{identifier(right_key)}'
-                                  for left, right_key in zip(step['left_keys'], step['right_keys']))
+        conditions = join_condition(frame, step, target)
         how = {'left': 'LEFT', 'right': 'RIGHT', 'inner': 'INNER', 'outer': 'FULL OUTER'}[step['how']]
         return f'SELECT {expressions} FROM {source} AS l {how} JOIN {right} AS r ON {conditions}'
     if operation == 2:
-        return f'SELECT * FROM {source} WHERE {filter_sql(frame, step)}'
+        return f'SELECT * FROM {source} WHERE {filter_sql(frame, step, spark=target == "sql")}'
     if operation == 3:
         expression, name = aggregate_sql(frame, step)
         keys = ', '.join(map(identifier, step['keys']))
@@ -348,9 +407,14 @@ def sql_step(frame, step, source, right=None):
         symbol = ' AND ' if step['how'] == 'any' else ' OR '
         return f'SELECT * FROM {source} WHERE ' + symbol.join(f'{identifier(column)} IS NOT NULL' for column in step['columns'])
     if step['action'] == 'inspect':
-        return '\nUNION ALL\n'.join('SELECT ' + ', '.join(expression + ' AS ' + identifier(name) for expression, name in inspect_expressions(column))
-                                   + f' FROM {source}' for column in step['columns'])
-    return 'SELECT ' + ', '.join(expression + ' AS ' + identifier(name) for expression, name in missing_projection(frame, step)) + f' FROM {source}'
+        counts = identifier(name + '_counts')
+        ctes.append(f'{counts} AS (\n  SELECT {select_list(inspect_counts(step["columns"]))} FROM {source}\n)')
+        return '\nUNION ALL\n'.join(f'SELECT {select_list(zip(row, INSPECT_NAMES))} FROM {counts}'
+                                     for row in inspect_rows(step['columns']))
+    query = f'SELECT {select_list(missing_projection(frame, step))} FROM {source}'
+    if step['action'] == 'median':
+        query += f' AS s CROSS JOIN (SELECT {select_list(median_expressions(step))} FROM {source}) AS m'
+    return query
 
 
 _NOTES = [
@@ -363,8 +427,9 @@ _NOTES = [
 
 
 def export_code(entry, steps, target):
-    if target not in {'pyspark', 'sql'}:
-        raise ValueError('Choose PySpark or Spark SQL output.')
+    database = target in {'mysql', 'postgres', 'sqlite', 'duckdb'}
+    if target not in {'pyspark', 'sql'} and not database:
+        raise ValueError('Choose a supported code output language.')
     if not steps:
         raise ValueError('Add a pipeline step first.')
     frame = entry['df']
@@ -391,12 +456,27 @@ def export_code(entry, steps, target):
     for step in steps:
         if step['operation'] == 1 and not any(item is step['right'] for item in entries):
             entries.append(step['right'])
-    lines = ['-- Spark SQL dialect; run in a Spark SQL session.'] + ['-- ' + note for note in _NOTES]
+    lines = (['-- Spark SQL dialect; run in a Spark SQL session.'] + ['-- ' + note for note in _NOTES]
+             if not database else [
+                 f'-- {target} SQL; run in your database SQL editor.',
+                 '-- Import the following sources as database tables before running this query.',
+                 '-- Preserve column names/types and convert missing values to SQL NULL.',
+                 '-- GUI previews use pandas; database collation, arithmetic and timestamps may differ.',
+                 '-- SQL has no pandas index. Use a total ORDER BY for reproducible pagination.',
+             ])
     ctes = []
     references = {}
     for index, item in enumerate(entries):
         name = f'tablelab_input_{index}'
-        setup, query = sql_read(item, name)
+        if database:
+            check_names(item['df'].columns)
+            path = item.get('source_path') or '(in-memory table: save as CSV first)'
+            description = repr(path).replace('\n', ' ').replace('\r', ' ')
+            setup = [f'-- Source {description} -> table {name}',
+                     '-- Columns: ' + ', '.join(repr(str(column)) for column in item['df'].columns)]
+            query = f'SELECT * FROM {identifier(name)}'
+        else:
+            setup, query = sql_read(item, name)
         lines += ['', *setup]
         reference = identifier(f'tablelab_source_{index}')
         references[id(item)] = reference
@@ -404,9 +484,12 @@ def export_code(entry, steps, target):
     source = references[id(entry)]
     for index, step in enumerate(steps):
         try:
+            if database:
+                validate_database_step(step, target)
             right = references.get(id(step.get('right')))
-            query = sql_step(frame, step, source, right)
-            source = identifier(f'tablelab_step_{index + 1}')
+            name = f'tablelab_step_{index + 1}'
+            query = sql_step(frame, step, source, right, target=target, ctes=ctes, name=name)
+            source = identifier(name)
             ctes.append(f"-- Step {index + 1}: {OPERATIONS[step['operation']]}\n{source} AS (\n  {query}\n)")
             if index < len(steps) - 1:
                 frame = execute_step(frame, step)
@@ -420,4 +503,43 @@ def export_code(entry, steps, target):
             f'{identifier(last["aliases"].get(column, column))} {direction} NULLS LAST'
             for column in last['order'])
     lines += ['', 'WITH ' + ',\n'.join(ctes), final + ';']
+    if database:
+        return database_sql(lines, target)
     return '\n'.join(lines) + '\n'
+
+
+def validate_database_step(step, target):
+    """Reject dialect gaps rather than silently changing query semantics."""
+    if target == 'mysql' and step['operation'] == 1 and step['how'] == 'outer':
+        raise ValueError('MySQL does not support FULL OUTER JOIN. Choose another SQL output.')
+    median = ((step['operation'] == 3 and step['aggregate'] == 'median') or
+              (step['operation'] == 4 and step['action'] == 'median'))
+    if median and target in {'mysql', 'sqlite', 'postgres'}:
+        raise ValueError(f'{target} median export is not supported yet. Choose DuckDB or Spark SQL.')
+
+
+def database_sql(lines, target):
+    """Render only the query in the selected dialect; retain source instructions."""
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except ImportError as exc:
+        import sys
+        raise ValueError(
+            'Database SQL export requires sqlglot in the Python environment running TableLab. '
+            'In this notebook run: %pip install "sqlglot>=25", then restart the kernel. '
+            f'Current Python: {sys.executable}'
+        ) from exc
+    query_index = next(index for index, line in enumerate(lines) if line.startswith('WITH '))
+    tree = sqlglot.parse_one('\n'.join(lines[query_index:]), read='spark')
+    # MySQL requires names for derived tables. Assign stable names for every dialect.
+    for index, subquery in enumerate(tree.find_all(exp.Subquery)):
+        if not subquery.alias:
+            subquery.set('alias', exp.TableAlias(this=exp.to_identifier(f'tablelab_derived_{index}')))
+    for select in tree.find_all(exp.Select):
+        if select.args.get('offset') and not select.args.get('limit'):
+            if target in {'mysql', 'sqlite'}:
+                select.set('limit', exp.Limit(expression=exp.Literal.number(
+                    18446744073709551615 if target == 'mysql' else -1)))
+    sql = tree.sql(dialect=target, pretty=True, unsupported_level=sqlglot.ErrorLevel.RAISE)
+    return '\n'.join(lines[:query_index]) + sql + ';\n'

@@ -1,6 +1,6 @@
 # tablelab
 
-Current release: **0.3.0**.
+Current release: **0.4.0**.
 
 Interactive table inspection in Jupyter. Browse for a table file, pick a series
 from a menu, and read it as a chart you can zoom into — from a single widget UI.
@@ -19,13 +19,13 @@ it, and puts the row's label in the chart title.
 
 ## Install
 
-Install the local 0.3.0 release from the project folder:
+Install the local 0.4.0 release from the project folder:
 
 ```bash
-python -m pip install dist/tablelab-0.3.0-py3-none-any.whl
+python -m pip install dist/tablelab-0.4.0-py3-none-any.whl
 ```
 
-In a notebook, use `%pip install /full/path/to/tablelab-0.3.0-py3-none-any.whl`
+In a notebook, use `%pip install /full/path/to/tablelab-0.4.0-py3-none-any.whl`
 in the selected kernel, then restart it. Launch the query GUI with:
 
 ```python
@@ -48,6 +48,23 @@ Optional readers and the pan/zoom toolbar are extras:
 ```bash
 pip install "tablelab[all]"
 ```
+
+SQL code generation dependencies, including `sqlglot`, are installed automatically
+with TableLab. In Jupyter, use `%pip` so installation targets the active notebook
+kernel. To install the current source checkout and its dependencies, run:
+
+```python
+%pip install -e /full/path/to/tablelab
+```
+
+Restart the kernel after installation and relaunch TableLab. Existing release
+wheels keep the dependencies recorded when they were built; rebuild the wheel
+after changing `pyproject.toml` before distributing the updated package.
+
+**Inspect a column** has independent Start row and End row controls (inclusive,
+starting at 1). It initially inspects the first 100 rows; **Show all** selects the
+full source. Statistics, categorical counts, and comparison plots use this range.
+This reduces inspection work; the full source table remains loaded in memory.
 
 | Extra | Adds |
 |---|---|
@@ -86,10 +103,10 @@ Adding the same disk path again selects its existing table. Uploads are kept
 separately, even when their filenames match. Switching tables resets the column,
 label filter, and row selection. Loaded tables stay in memory for the app session.
 
-For the shortest route, open `examples/chart_gui.ipynb` and run its GUI
-cell. The release examples are portable notebooks with no saved outputs.
+For the shortest route, open `examples/tablelab_queries.ipynb` and run its GUI
+cell. The release example is a portable notebook with no saved outputs.
 
-For joins and queries, open the separate `examples/tablelab_queries.ipynb`.
+For joins and queries, use the same `examples/tablelab_queries.ipynb`.
 Its GUI supports left/inner/right/outer joins (including multiple matching keys),
 column filters, and grouped counts, sums, means, medians, minima, and maxima.
 The **Select** tab beside **Join** provides SQL-like column selection,
@@ -300,7 +317,7 @@ the default, `True` adds the vertical lines the app's checkbox asks for, and
 
 MIT
 
-Choose **Code output: Pandas / PySpark / Spark SQL**, then **Show code** for the
+Choose **Code output: Pandas / PySpark / Spark SQL / MySQL / PostgreSQL / SQLite / DuckDB**, then **Show code** for the
 saved prefix plus current settings, or **Show pipeline code** for saved steps only.
 Generated code appears in the preview window with instructions for where to run it.
 Use **Copy code** to copy the displayed code. If your notebook blocks clipboard
@@ -309,8 +326,18 @@ output language or query settings clears old code so it cannot be copied by mist
 PySpark exports include a Spark
 session, file reads with schemas, transformations, and result display. SQL exports
 include temporary input views and a query with named steps. Both cover Select,
-Join, Filter, Group & summarise, and Missing values. SQL targets **Spark SQL**;
-it is not a portable script for every database.
+Join, Filter, Group & summarise, and Missing values.
+
+Database SQL exports target **MySQL 8+**, **PostgreSQL**, **SQLite 3.39+**, or
+**DuckDB**. Import each listed source file into its named `tablelab_input_0`,
+`tablelab_input_1`, etc. table before running the generated query in a SQL editor.
+Keep the original column names and types, and load missing values as SQL NULL.
+These exports include projections, aliases, calculations, DISTINCT, sorting,
+pagination, joins, filters, grouped summaries, and missing-value handling, composed
+as named query steps (CTEs). They do not connect to a database or import files.
+MySQL full outer joins and median operations in MySQL, PostgreSQL, and SQLite
+currently report an export error; use DuckDB or Spark SQL for those settings.
+Database sorting/collation, arithmetic, and timestamps can differ from pandas.
 
 Previews still run locally with pandas; exporting code does not run Spark or
 require PySpark to be installed in TableLab. Run exports in a **Spark 3.5+**

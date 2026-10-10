@@ -19,6 +19,7 @@ class ColumnInspector(TableApp):
         self.active = False
         self._setting_pair = False
         self._relationship_fig = None
+        self._setting_range = False
         super().__init__(zoom=zoom)
         self.compare = widgets.Checkbox(description='Compare columns', value=False,
                                         indent=False, layout=widgets.Layout(width='160px'))
@@ -39,13 +40,75 @@ class ColumnInspector(TableApp):
         self.compare.observe(lambda _: self._draw(), names='value')
         self.relationship_x.observe(lambda _: self._draw_relationship(), names='value')
         self.comparison_view.observe(lambda _: self._draw_relationship(), names='value')
-        self.ui = widgets.VBox([self.status, self._column_box, self._chart_area])
+        self.start_row = widgets.BoundedIntText(description='Start row:', value=1, min=1, max=1)
+        self.end_row = widgets.BoundedIntText(description='End row:', value=1, min=1, max=1)
+        self.show_all_btn = widgets.Button(description='Show all')
+        self.range_info = widgets.HTML()
+        self.start_row.observe(self._range_changed, names='value')
+        self.end_row.observe(self._range_changed, names='value')
+        self.show_all_btn.on_click(self._show_all)
+        self.ui = widgets.VBox([self.status,
+                               widgets.HBox([self.start_row, self.end_row, self.show_all_btn]),
+                               self.range_info, self._column_box, self._chart_area])
 
     def set_table(self, df, name="Source table"):
+        self._setting_range = True
+        try:
+            count = len(df) if df is not None else 0
+            self.start_row.max = self.end_row.max = max(1, count)
+            self.start_row.value = 1
+            self.end_row.value = max(1, min(100, count))
+            self.start_row.disabled = self.end_row.disabled = self.show_all_btn.disabled = not count
+        finally:
+            self._setting_range = False
         # Reference the query app's table rather than copying the full dataset.
         self.tables = ([] if df is None else
                        [{"name": name, "source": None, "df": df}])
         self._fill_table_menu(0 if df is not None else None)
+        self._update_range_info()
+
+    def _update_range_info(self):
+        count = 0 if self.df is None else len(self.df)
+        shown = len(self.inspection_frame()) if count else 0
+        self.range_info.value = (f'Inspecting {shown:,} of {count:,} rows. '
+                                 'Range uses source row positions, starting at 1; source data stays loaded.')
+
+    def inspection_frame(self):
+        if self.df is None:
+            return None
+        return self.df.iloc[self.start_row.value - 1:self.end_row.value]
+
+    def series(self):
+        chosen = super().series()
+        if chosen is None or not hasattr(self, 'start_row'):
+            return chosen
+        values, title, xlabel, ylabel = chosen
+        return values.iloc[self.start_row.value - 1:self.end_row.value], title, xlabel, ylabel
+
+    def _range_changed(self, change):
+        if self._setting_range:
+            return
+        self._setting_range = True
+        try:
+            if self.start_row.value > self.end_row.value:
+                if change['owner'] is self.start_row:
+                    self.end_row.value = self.start_row.value
+                else:
+                    self.start_row.value = self.end_row.value
+        finally:
+            self._setting_range = False
+        self._update_range_info()
+        self._draw()
+
+    def _show_all(self, _=None):
+        self._setting_range = True
+        try:
+            self.start_row.value = 1
+            self.end_row.value = max(1, len(self.df) if self.df is not None else 0)
+        finally:
+            self._setting_range = False
+        self._update_range_info()
+        self._draw()
 
     def _select_table(self):
         if self._loading:
@@ -97,17 +160,18 @@ class ColumnInspector(TableApp):
             self._draw_sample_curves(x, y)
             return
         # Keep only valid pairs; do not copy the source or align by possibly duplicate index labels.
-        valid = (np.isfinite(self.df[x]) & np.isfinite(self.df[y])).fillna(False)
+        frame = self.inspection_frame()
+        valid = (np.isfinite(frame[x]) & np.isfinite(frame[y])).fillna(False)
         positions = np.flatnonzero(valid.to_numpy(dtype=bool))
         count = len(positions)
-        omitted = len(self.df) - count
+        omitted = len(frame) - count
         if not count:
             self.relationship_info.value = 'No rows have finite numeric values in both columns.'
             return
         if count > self.MAX_SCATTER_POINTS:
             positions = positions[np.linspace(0, count - 1, self.MAX_SCATTER_POINTS, dtype=int)]
-        xv = self.df[x].iloc[positions].to_numpy(dtype=float)
-        yv = self.df[y].iloc[positions].to_numpy(dtype=float)
+        xv = frame[x].iloc[positions].to_numpy(dtype=float)
+        yv = frame[y].iloc[positions].to_numpy(dtype=float)
         fig = figures.figure()
         self._relationship_fig = fig
         ax = fig.add_subplot(111)
@@ -121,14 +185,15 @@ class ColumnInspector(TableApp):
         figures.show_in_output(fig, self.relationship_chart)
 
     def _draw_sample_curves(self, x, y):
-        count = len(self.df)
+        frame = self.inspection_frame()
+        count = len(frame)
         if not count:
             self.relationship_info.value = 'No samples to plot.'
             return
         positions = (np.linspace(0, count - 1, self.MAX_SCATTER_POINTS, dtype=int)
                      if count > self.MAX_SCATTER_POINTS else np.arange(count))
-        xv = self.df[x].iloc[positions].to_numpy(dtype=float, na_value=np.nan, copy=True)
-        yv = self.df[y].iloc[positions].to_numpy(dtype=float, na_value=np.nan, copy=True)
+        xv = frame[x].iloc[positions].to_numpy(dtype=float, na_value=np.nan, copy=True)
+        yv = frame[y].iloc[positions].to_numpy(dtype=float, na_value=np.nan, copy=True)
         xv[~np.isfinite(xv)] = np.nan
         yv[~np.isfinite(yv)] = np.nan
         if not np.isfinite(xv).any() and not np.isfinite(yv).any():
@@ -137,7 +202,7 @@ class ColumnInspector(TableApp):
         fig = figures.figure()
         self._relationship_fig = fig
         ax = fig.add_subplot(111)
-        samples = positions + 1
+        samples = positions + self.start_row.value
         ax.plot(samples, xv, label=str(x), linewidth=1, marker='.', markersize=3)
         ax.plot(samples, yv, label=str(y), linewidth=1, marker='.', markersize=3)
         ax.set(xlabel='Sample (row position, starting at 1)', ylabel='Value',

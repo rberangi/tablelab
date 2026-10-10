@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 2026-10-10
+
+- Independent inspector row range, initially rows 1–100, with Show all for statistics and plots.
+
+- Remove the separate chart GUI notebook; use `examples/tablelab_queries.ipynb` as the main example.
+
+- MySQL 8+, PostgreSQL, SQLite 3.39+, and DuckDB SQL exports for query settings and pipelines,
+  with source table mappings and explicit errors for unsupported dialect operations.
+
 ## 0.3.0 — 2026-10-10
 
 - Separate query GUI with Select, Join, Filter, Group & summarise, and Missing values.

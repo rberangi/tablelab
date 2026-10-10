@@ -242,7 +242,9 @@ class QueryApp:
         self.column_view.observe(self._column_view_changed, names="selected_index")
         self.code_target = widgets.Dropdown(
             description='Code output:', options=[('Pandas', 'pandas'), ('PySpark', 'pyspark'),
-                                                 ('Spark SQL', 'sql')], value='pandas',
+                                                 ('Spark SQL', 'sql'), ('MySQL 8+', 'mysql'),
+                                                 ('PostgreSQL', 'postgres'), ('SQLite 3.39+', 'sqlite'),
+                                                 ('DuckDB', 'duckdb')], value='pandas',
             layout=widgets.Layout(width='270px'))
         self.code_help = widgets.HTML()
         self._update_code_help()
@@ -1158,6 +1160,9 @@ class QueryApp:
             'sql': 'SQL code: run in a Spark 3.5+ SQL editor. Do not paste directly into a Python cell. '
                    'From Python, create a Spark session and pass each statement separately to spark.sql(...).',
         }
+        for target in ('mysql', 'postgres', 'sqlite', 'duckdb'):
+            guidance[target] = ('SQL code: import the listed source files into the named database tables, '
+                                'then run the query in your database SQL editor. No database connection is made here.')
         self.code_help.value = (f'<b>{escape(self.code_target.label)}</b> — '
                                 f'{escape(guidance[self.code_target.value])} '
                                 'Check input file paths. GUI previews use pandas.')
