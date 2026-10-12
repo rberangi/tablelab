@@ -191,3 +191,45 @@ def test_inspection_range_limits_series_pairs_and_sample_positions(inspector):
     assert inspector.start_row.value == inspector.end_row.value == 30
     inspector.set_table(frame.iloc[:2])
     assert inspector.start_row.value == 1 and inspector.end_row.value == 2
+
+
+def test_category_encoding_mapping_is_stable_and_preserves_missing_values():
+    inspector = ColumnInspector(zoom=False)
+    frame = pd.DataFrame({'city': ['Sydney', '<Melbourne>', None, 'Sydney'],
+                          'value': [1, 2, 3, 4]}, index=[7, 7, 7, 7])
+    original = frame.copy(deep=True)
+    inspector.set_table(frame)
+    inspector.set_active(True)
+    inspector.encode_categories.value = True
+    values = inspector.series()[0]
+    assert values.iloc[[0, 1, 3]].tolist() == [0., 1., 0.]
+    assert pd.isna(values.iloc[2])
+    assert inspector.data_type.value == 'numeric'
+    assert '&lt;Melbourne&gt;' in inspector.encoding_mapping.value
+    inspector.start_row.value = 2
+    assert inspector.series()[0].iloc[0] == 1.
+    inspector.encode_categories.value = False
+    assert inspector.data_type.value == 'categorical'
+    assert not inspector.encoding_mapping.value
+    pd.testing.assert_frame_equal(frame, original)
+    inspector.set_active(False)
+
+
+def test_category_encoding_in_scatter_and_two_curves(inspector):
+    frame = pd.DataFrame({'city': ['Sydney', 'Melbourne', None, 'Sydney'],
+                          'kind': ['A', 'B', 'A', 'B'], 'value': [1., 2., 3., 4.]}, index=[9]*4)
+    original = frame.copy(deep=True)
+    inspector.set_table(frame)
+    inspector.compare.value = True
+    inspector.encode_categories.value = True
+    inspector.relationship_x.value = 'value'
+    inspector.set_active(True)
+    assert len(inspector._relationship_fig.axes[0].collections[0].get_offsets()) == 3
+    assert 'Sydney' in inspector.encoding_mapping.value
+    inspector.relationship_x.value = 'kind'
+    assert 'city' in inspector.encoding_mapping.value and 'kind' in inspector.encoding_mapping.value
+    inspector.comparison_view.value = 'samples'
+    assert len(inspector._relationship_fig.axes[0].lines) == 2
+    inspector.start_row.value = 2
+    assert inspector._relationship_fig.axes[0].lines[1].get_ydata()[0] == 1.
+    pd.testing.assert_frame_equal(frame, original)

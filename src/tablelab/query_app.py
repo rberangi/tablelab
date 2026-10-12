@@ -12,7 +12,7 @@ from IPython.display import display
 from . import __version__
 from .file_readers import _has_header, load_table, read_uploaded_dataframe, read_table_source, table_location
 from .filepicker import FilePicker, SaveFilePicker
-from .paged_preview import PagedTablePreview, table_preview_html
+from .paged_preview import PagedTablePreview, table_preview_html, join_column_origins, JOIN_COLORS
 from .query_expressions import arithmetic_code, condition_tree
 from .pipeline import OPERATIONS, capture_step, execute_step, step_code, group_summary_name
 from .code_export import export_code
@@ -108,6 +108,8 @@ class QueryApp:
                                         layout=widgets.Layout(width="300px"))
         self.left_keys = widgets.SelectMultiple(description="Left keys:")
         self.right_keys = widgets.SelectMultiple(description="Right keys:")
+        self.left_table.layout.border = self.left_keys.layout.border = '2px solid ' + JOIN_COLORS['left']
+        self.right.layout.border = self.right_keys.layout.border = '2px solid ' + JOIN_COLORS['right']
         self.join_type = widgets.Dropdown(description="Join:", options=[
             ("Left — keep all source rows", "left"), ("Inner — matched rows", "inner"),
             ("Right — keep all right rows", "right"), ("Outer — keep both", "outer")])
@@ -123,6 +125,10 @@ class QueryApp:
         self.select_distinct = widgets.Checkbox(description="Distinct rows", indent=False)
         self.select_order = widgets.SelectMultiple(description="Order by:")
         self.select_ascending = widgets.Checkbox(value=True, description="Ascending", indent=False)
+        self.select_distinct.layout.width = '140px'
+        self.select_ascending.layout.width = '110px'
+        self.select_row_count = widgets.HTML(value="<b>Input rows:</b> 0")
+        self.select_distinct_count = widgets.HTML(value="<b>Distinct rows:</b> 0")
         self.select_limit = widgets.BoundedIntText(description="Limit:", min=0, max=2**31 - 1, value=0)
         self.select_offset = widgets.BoundedIntText(description="Offset:", min=0, max=2**31 - 1, value=0)
         self.alias_rows = []
@@ -171,7 +177,9 @@ class QueryApp:
                 widgets.HTML("Aliases rename output columns. Calculations use +, -, *, /, //, %, "
                              "numbers and parentheses, e.g. price * quantity. "
                              "Use col('column name') for names with spaces. Calculated columns are included in the output."),
-                widgets.HBox([self.select_distinct, self.select_ascending]),
+                widgets.HBox([self.select_distinct, self.select_ascending, self.select_row_count,
+                              self.select_distinct_count],
+                             layout=widgets.Layout(align_items="center", flex_flow="row wrap", grid_gap="8px")),
                 widgets.HBox([self.select_limit, self.select_offset]),
                 widgets.HTML("Select columns with Ctrl/Cmd. Order by columns must be selected. "
                              "Limit 0 keeps all rows; offset skips rows. "
@@ -193,8 +201,10 @@ class QueryApp:
                              "This sets the grouping column sequence in results and generated code. "
                              "To sort result rows, add a Select step and choose Order by."),
                 self.aggregate, self.filter_column, self.group_alias]),
-            widgets.VBox([self.missing_columns, self.missing_action,
-                          self.missing_how, self.missing_value,
+            widgets.VBox([self.missing_columns,
+                          widgets.HBox([self.missing_action, self.missing_value],
+                                       layout=widgets.Layout(flex_flow="row wrap")),
+                          self.missing_how,
                           widgets.HTML("Apply to preview missing counts or a cleaned table. "
                                        "Actions affect only selected columns. Median requires numeric columns "
                                        "and leaves entirely missing columns unchanged. "
@@ -207,6 +217,7 @@ class QueryApp:
         self._tab_tooltip_style = widgets.HTML(layout=widgets.Layout(display="none"))
         self._update_tab_tooltips()
         self.run_btn = widgets.Button(description="Apply and preview result", icon="play", disabled=True,
+                                      button_style="info",
                                        layout=widgets.Layout(width="230px"))
         self.code_btn = widgets.Button(description="Show code", icon="code", disabled=True,
                                         layout=widgets.Layout(width="180px"))
@@ -309,7 +320,7 @@ class QueryApp:
             ('pipeline_up_btn', 'Move up', lambda: self.move_step(-1)),
             ('pipeline_down_btn', 'Move down', lambda: self.move_step(1)),
             ('pipeline_remove_btn', 'Remove step', self.remove_step),
-            ('pipeline_preview_btn', 'Preview selected step', self.preview_step),
+            ('pipeline_preview_btn', 'Preview up to this step', self.preview_step),
             ('pipeline_run_btn', 'Run pipeline', self.run_pipeline),
             ('pipeline_code_btn', 'Show pipeline code', self.show_pipeline_code),
             ('pipeline_clear_btn', 'Clear pipeline', self.clear_pipeline),
@@ -320,6 +331,11 @@ class QueryApp:
             button.on_click(lambda _, callback=callback: callback())
             setattr(self, attribute, button)
             controls.append(button)
+        self.pipeline_run_btn.button_style = 'success'
+        self.pipeline_run_btn.icon = 'play'
+        self.pipeline_preview_btn.button_style = 'info'
+        self.pipeline_preview_btn.icon = 'arrow-right'
+        self.pipeline_preview_btn.layout.width = '230px'
         self.pipeline_list.observe(lambda _: self._pipeline_buttons(), names='value')
         ui = widgets.VBox([
             self.pipeline_info, self.pipeline_list,
@@ -386,6 +402,7 @@ class QueryApp:
         frame = self._pipeline_source_entry['df']
         for index, step in enumerate(self.pipeline_steps[:stop]):
             try:
+                self._remember_join_origins(frame, step, index + 1)
                 frame = execute_step(frame, step)
             except Exception as exc:
                 raise ValueError(f"Step {index + 1} ({OPERATIONS[step['operation']]}): {exc}") from exc
@@ -397,6 +414,7 @@ class QueryApp:
         frame = self._pipeline_source_entry['df'] if self._pipeline_source_entry is not None else None
         for index, step in enumerate(self.pipeline_steps):
             try:
+                self._remember_join_origins(frame, step, index + 1)
                 frame = execute_step(frame, step)
             except Exception as exc:
                 self._pipeline_error_index = index
@@ -421,10 +439,17 @@ class QueryApp:
                 raise ValueError('Add and select a source table first.')
             step = capture_step(self)
             result = execute_step(self.df, step)
+            self._remember_join_origins(self.df, step, len(self.pipeline_steps) + 1)
             self.pipeline_steps.append(step)
             self._pipeline_input = result
             self._pipeline_changed(len(self.pipeline_steps) - 1)
+            if step['operation'] == 1:
+                # The saved result is now the next input. Do not leave a second
+                # copy of the just-saved Join configured as the current draft.
+                self.tabs.selected_index = 0
             self._display_pipeline_result(result, len(self.pipeline_steps))
+            if step['operation'] == 1:
+                self.status.value += ' Join saved once. Select is ready for the next step.'
             return result
         except Exception as exc:
             self._error(exc)
@@ -555,6 +580,7 @@ class QueryApp:
 
     def _display_pipeline_result(self, result, count):
         self.result = result
+        self._result_column_origins = getattr(self, '_pipeline_join_origins', {}).get(count, {})
         self.keep_btn.disabled = False
         self._configure_row_range(len(result))
         self.status.value = (f'Pipeline result through step {count}: {len(result):,} rows × '
@@ -922,6 +948,7 @@ class QueryApp:
             return
         self._sync_pipeline_source()
         df = self.df
+        self.select_row_count.value = f'<b>Input rows:</b> {len(df) if df is not None else 0:,}'
         self.save_btn.disabled = df is None
         self.save_status.value = ""
         self.save_picker.close()
@@ -948,7 +975,9 @@ class QueryApp:
         self.filter_expression.value = ""
         self.filter_combine.value = "and"
         columns = list(df.columns) if df is not None else []
+        left_keys = self.left_keys.value
         self.left_keys.options = self.group_keys.options = columns
+        self.left_keys.value = tuple(key for key in left_keys if key in columns)
         self.missing_columns.options = columns
         self.missing_columns.value = tuple(columns)
         self.select_columns.options = self.select_order.options = columns
@@ -976,8 +1005,11 @@ class QueryApp:
             return
         self.right.tooltip = (f"{self.right.value + 1}: {self.tables[self.right.value]['name']}"
                               if self.right.value is not None else None)
-        self.right_keys.options = ([] if self.right.value is None else
-                                   list(self.tables[self.right.value]["df"].columns))
+        right_keys = self.right_keys.value
+        columns = ([] if self.right.value is None else
+                   list(self.tables[self.right.value]["df"].columns))
+        self.right_keys.options = columns
+        self.right_keys.value = tuple(key for key in right_keys if key in columns)
         self._invalidate()
 
     def _update_tab_tooltips(self):
@@ -1086,7 +1118,21 @@ class QueryApp:
             column = self.result.columns[-1]
         elif column not in self.result.columns and f"{column}_left" in self.result.columns:
             column = f"{column}_left"
-        self._set_result_html(table_preview_html(selected, selected_column=column).data)
+        origins = getattr(self, '_result_column_origins', {})
+        self._set_result_html(table_preview_html(
+            selected, selected_column=None if origins else column, column_origins=origins).data)
+
+    def _remember_join_origins(self, frame, step, count):
+        if not hasattr(self, '_pipeline_join_origins'):
+            self._pipeline_join_origins = {}
+        self._pipeline_join_origins[count] = self._join_origins(frame, step)
+
+    @staticmethod
+    def _join_origins(frame, step):
+        if step['operation'] != 1:
+            return {}
+        return join_column_origins(frame.columns, step['right']['df'].columns,
+                                   step['left_keys'], step['right_keys'])
 
     def _set_result_html(self, html):
         """Replace one output directly, avoiding notebook output-capture duplicates."""
@@ -1097,6 +1143,7 @@ class QueryApp:
     def _invalidate(self):
         if self._updating:
             return
+        self._update_distinct_count()
         if self.result is not None:
             self.status.value = "Query settings changed. Preview the result again."
         self.result = None
@@ -1107,6 +1154,34 @@ class QueryApp:
         self._displayed_code = None
         self.copy_code_btn.disabled = True
         self.copy_feedback.outputs = ()
+
+    def _update_distinct_count(self):
+        if not hasattr(self, 'select_distinct_count') or self.tabs.selected_index != 0:
+            return
+        frame = self.df
+        if frame is None:
+            self.select_distinct_count.value = '<b>Distinct rows:</b> 0'
+            self._distinct_count_key = None
+            return
+        try:
+            columns = list(self.select_columns.value)
+            calculations = [(name, expression) for name, expression, _ in self._calculations()]
+            key = (id(frame), tuple(columns), tuple(calculations))
+            if key == getattr(self, '_distinct_count_key', None):
+                return
+            if not columns and not calculations:
+                raise ValueError('Select output columns first.')
+            if calculations:
+                step = dict(operation=0, columns=columns, calculations=calculations, aliases={},
+                            order=[], distinct=True, ascending=True, limit=0, offset=0)
+                count = len(execute_step(frame, step))
+            else:
+                count = len(frame[columns].drop_duplicates())
+            self.select_distinct_count.value = f'<b>Distinct rows:</b> {count:,}'
+            self._distinct_count_key = key
+        except Exception:
+            self.select_distinct_count.value = '<b>Distinct rows:</b> — (check selection)'
+            self._distinct_count_key = None
 
     def _error(self, exc):
         self._invalidate()
@@ -1244,6 +1319,7 @@ class QueryApp:
             step = capture_step(self)
             result = execute_step(self.df, step)
             self.result = result
+            self._result_column_origins = self._join_origins(self.df, step)
             self.keep_btn.disabled = False
             self._configure_row_range(len(result))
             self.status.value = (f"Result: {len(result):,} rows × {len(result.columns):,} columns. "

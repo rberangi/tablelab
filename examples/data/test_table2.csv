@@ -1,0 +1,4 @@
+order_id,delivery_status,shipping_cost
+102,Shipped,5
+103,Pending,7
+104,Delivered,9

@@ -734,3 +734,36 @@ def test_shared_column_drives_summary_and_result_shading(monkeypatch):
     app.run()
     assert "nth-last-child(2)" in app.result_preview.outputs[0]["data"]["text/html"]
     assert not hasattr(app, "metric")
+
+
+def test_join_preview_colors_track_origin_and_paging():
+    from tablelab.paged_preview import JOIN_COLORS, join_column_origins
+    left = pd.DataFrame({'id': [1, 2], 'value': [10, 20], 'left only': ['a', 'b']})
+    right = pd.DataFrame({'id': [1, 2], 'value': [30, 40], 'right only': ['c', 'd']})
+    app = QueryApp()
+    app.add_table(left, 'Left')
+    app.add_table(right, 'Right')
+    app.source.value = 0
+    app.tabs.selected_index = 1
+    app.right.value = 1
+    app.left_keys.value = app.right_keys.value = ('id',)
+    result = app.run()
+    assert result is not None
+    expected = {'id': 'both', 'value_left': 'left', 'left only': 'left',
+                'value_right': 'right', 'right only': 'right'}
+    assert app._result_column_origins == expected
+    for color in JOIN_COLORS.values():
+        assert color in app.result_preview.outputs[0]['data']['text/html']
+    assert 'Shared join key' in app.result_preview.outputs[0]['data']['text/html']
+    app.end_row.value = 1
+    app._move_result(1)
+    assert app._result_column_origins == expected
+    app.add_step()
+    assert app._result_column_origins == expected
+    app.run_pipeline()
+    assert app._result_column_origins == expected
+    assert join_column_origins(['id', 'v'], ['key', 'v'], ['id'], ['key']) == {
+        'id': 'left', 'v_left': 'left', 'key': 'right', 'v_right': 'right'}
+    app.tabs.selected_index = 0
+    app.run()
+    assert app._result_column_origins == {}

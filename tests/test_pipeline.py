@@ -265,3 +265,44 @@ def test_select_code_avoids_full_copies_and_keeps_input_unchanged():
     exec(code, namespace)
     pd.testing.assert_frame_equal(namespace['result'], execute_step(frame, step))
     pd.testing.assert_frame_equal(frame, original)
+
+
+def test_adding_join_step_preserves_available_join_keys():
+    app = QueryApp()
+    app.add_table(pd.DataFrame({'order_id': [1, 2], 'customer': ['Ada', 'Ben']}), 'Left')
+    app.add_table(pd.DataFrame({'order_id': [2, 3], 'status': ['sent', 'pending']}), 'Right')
+    app.source.value = 0
+    app.right.value = 1
+    app.tabs.selected_index = 1
+    app.left_keys.value = app.right_keys.value = ('order_id',)
+    assert app.add_step() is not None
+    assert app.left_keys.value == app.right_keys.value == ('order_id',)
+    app.pipeline_list.value = 0
+    assert app.left_keys.value == ('order_id',)
+    app.run_pipeline()
+    assert app.left_keys.value == ('order_id',)
+    app.tabs.selected_index = 0
+    app.select_columns.value = ('customer',)
+    assert app.add_step() is not None
+    assert app.left_keys.value == ()  # Removed columns cannot remain selected.
+
+
+def test_preview_then_save_join_does_not_leave_a_second_join_draft():
+    app = QueryApp()
+    app.add_table(pd.DataFrame({'id': [1, 2], 'name': ['Ada', 'Ben']}), 'Left')
+    app.add_table(pd.DataFrame({'id': [1, 1, 2], 'amount': [10, 20, 30]}), 'Right')
+    app.source.value = 0
+    app.right.value = 1
+    app.tabs.selected_index = 1
+    app.left_keys.value = app.right_keys.value = ('id',)
+    preview = app.run().copy()
+    saved = app.add_step()
+    assert len(app.pipeline_steps) == 1
+    assert app.tabs.selected_index == 0
+    pd.testing.assert_frame_equal(saved, preview)
+    pd.testing.assert_frame_equal(app.run(), preview)
+    pd.testing.assert_frame_equal(app.run_pipeline(), preview)
+    assert app.generated_code().count('source.merge(') == 1
+    assert app.add_step() is not None
+    assert [step['operation'] for step in app.pipeline_steps] == [1, 0]
+    pd.testing.assert_frame_equal(app.run_pipeline(), preview)

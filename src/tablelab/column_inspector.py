@@ -33,7 +33,12 @@ class ColumnInspector(TableApp):
         self.relationship_y = self.column
         self.relationship_info = widgets.HTML()
         self.relationship_chart = self.chart
-        self._column_box.children = [self.column, self.data_type, self.compare, self.relationship_x, self.comparison_view]
+        self.encode_categories = widgets.Checkbox(description='Encode categories', indent=False,
+                                                  layout=widgets.Layout(width='180px'))
+        self.encoding_mapping = widgets.HTML()
+        self.encode_categories.observe(self._encoding_changed, names='value')
+        self._column_box.children = [self.column, self.data_type, self.encode_categories,
+                                     self.compare, self.relationship_x, self.comparison_view]
         self._column_box.layout.flex_flow = 'row wrap'
         self._chart_area = widgets.VBox([
             self._view_box, self.chart_tabs, self.text_preview, self.stats_acc])
@@ -49,7 +54,43 @@ class ColumnInspector(TableApp):
         self.show_all_btn.on_click(self._show_all)
         self.ui = widgets.VBox([self.status,
                                widgets.HBox([self.start_row, self.end_row, self.show_all_btn]),
-                               self.range_info, self._column_box, self._chart_area])
+                               self.range_info, self._column_box, self.encoding_mapping, self._chart_area])
+
+    def _encoding_changed(self, _):
+        self._type_selection = None
+        self._draw()
+
+    def _encoded_column(self, column=None):
+        """Use a stable full-source mapping so row-range changes retain codes."""
+        column = self.column.value if column is None else column
+        values = self.df[column]
+        codes, categories = pd.factorize(values, sort=False)
+        encoded = pd.Series(codes, index=values.index, name=values.name, dtype=float)
+        encoded = encoded.mask(encoded < 0)
+        mapping = pd.DataFrame({'Category': list(categories), 'Code': range(len(categories))})
+        if not hasattr(self, '_encoding_mappings'):
+            self._encoding_mappings = {}
+        self._encoding_mappings[column] = mapping
+        self.encoding_mapping.value = (
+            '<b>Category mapping</b> (first appearance in the full source). '
+            'Missing values remain missing. Codes are labels, not quantities or ranks. '
+            'Encoding applies only to inspection; source data is unchanged.'
+            '<div style="max-height:220px;overflow:auto">' + ''.join(
+                '<b>' + escape(str(name)) + '</b>' + table.to_html(index=False, escape=True)
+                for name, table in self._encoding_mappings.items()) + '</div>')
+        return encoded
+
+    def _comparison_frame(self, x, y):
+        self._encoding_mappings = {}
+        self.encoding_mapping.value = ''
+        frame = self.inspection_frame()[[x, y]].copy(deep=False)
+        if self.encode_categories.value:
+            for column in (x, y):
+                if (not pd.api.types.is_numeric_dtype(frame[column].dtype)
+                        or pd.api.types.is_bool_dtype(frame[column].dtype)):
+                    frame[column] = self._encoded_column(column).iloc[
+                        self.start_row.value - 1:self.end_row.value].to_numpy()
+        return frame
 
     def set_table(self, df, name="Source table"):
         self._setting_range = True
@@ -83,6 +124,10 @@ class ColumnInspector(TableApp):
         if chosen is None or not hasattr(self, 'start_row'):
             return chosen
         values, title, xlabel, ylabel = chosen
+        if hasattr(self, 'encode_categories') and self.encode_categories.value:
+            values = self._encoded_column()
+            title += ' (category codes)'
+            ylabel = 'Category code'
         return values.iloc[self.start_row.value - 1:self.end_row.value], title, xlabel, ylabel
 
     def _range_changed(self, change):
@@ -124,6 +169,9 @@ class ColumnInspector(TableApp):
                    if pd.api.types.is_numeric_dtype(self.df[column].dtype)
                    and not pd.api.types.is_bool_dtype(self.df[column].dtype)
                    and not pd.api.types.is_complex_dtype(self.df[column].dtype)])
+        if self.df is not None and self.encode_categories.value:
+            columns = [column for column in self.df.columns
+                       if not pd.api.types.is_complex_dtype(self.df[column].dtype)]
         candidates = [column for column in columns if column != self.column.value]
         old_x = self.relationship_x.value
         self._setting_pair = True
@@ -160,7 +208,7 @@ class ColumnInspector(TableApp):
             self._draw_sample_curves(x, y)
             return
         # Keep only valid pairs; do not copy the source or align by possibly duplicate index labels.
-        frame = self.inspection_frame()
+        frame = self._comparison_frame(x, y)
         valid = (np.isfinite(frame[x]) & np.isfinite(frame[y])).fillna(False)
         positions = np.flatnonzero(valid.to_numpy(dtype=bool))
         count = len(positions)
@@ -185,7 +233,7 @@ class ColumnInspector(TableApp):
         figures.show_in_output(fig, self.relationship_chart)
 
     def _draw_sample_curves(self, x, y):
-        frame = self.inspection_frame()
+        frame = self._comparison_frame(x, y)
         count = len(frame)
         if not count:
             self.relationship_info.value = 'No samples to plot.'
@@ -229,6 +277,10 @@ class ColumnInspector(TableApp):
             return
         if self._loading:
             return
+        if hasattr(self, 'encoding_mapping'):
+            self.encoding_mapping.value = ''
+            self._encoding_mappings = {}
+            self.encode_categories.disabled = self.df is None
         self._refresh_relationship()
         comparing = self.compare.value
         self.relationship_x.layout.display = '' if comparing else 'none'

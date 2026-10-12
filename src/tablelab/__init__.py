@@ -32,7 +32,7 @@ Building the widgets takes a moment, so it is deferred until `main` is actually
 looked up rather than done on `import tablelab`.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = ["__version__", "main", "TableApp", "query_main", "QueryApp", "load_table", "read_uploaded_dataframe",
            "find_label_column", "describe", "summary_stats",
            "run_chart", "sorted_run_chart", "histogram", "box_plot", "ecdf",

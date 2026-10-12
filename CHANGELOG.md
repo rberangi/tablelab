@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 — 2026-10-12
+
+- Join preview colours and origin legend for left, right, and shared-key columns.
+- Preserve available join keys across input refreshes; switch to Select after saving a Join.
+- Input and distinct row counts beside Select sorting controls.
+- Category encoding with visible mappings for inspection and comparison plots.
+- Coloured pipeline/preview buttons, clearer intermediate-preview label, and inline fill-value control.
+- Small CSV examples demonstrating all four join types.
+
 ## 0.4.0 — 2026-10-10
 
 - Independent inspector row range, initially rows 1–100, with Show all for statistics and plots.

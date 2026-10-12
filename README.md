@@ -1,31 +1,58 @@
 # tablelab
 
-Current release: **0.4.0**.
+Current release: **0.5.0**.
 
-Interactive table inspection in Jupyter. Browse for a table file, pick a series
-from a menu, and read it as a chart you can zoom into — from a single widget UI.
+TableLab is a notebook GUI for exploring and transforming tables. Select columns,
+filter rows, join tables, create grouped summaries, handle missing values, and
+build saved query pipelines. Inspect columns with statistics and plots, then
+export pandas, PySpark, or SQL code from the same settings.
 
-Two ways to pick the series, because "a column" means different things depending
-on how the table is laid out:
+Start with `examples/tablelab_queries.ipynb` or launch `query_main()` below.
+The separate `main()` API remains available for column and row chart inspection.
 
-- **Column** — a column down the rows. For tables where each row is an
-  observation: one reading per row, columns are the variables.
-- **Row** — a row across the columns. For tables where each row *is* a signal:
-  an ECG beat, a sensor sweep, a spectrum. This is the shape of ECG5000 and most
-  of the UCR time-series archive.
+## New in 0.5.0
 
-When the table has a label column, tablelab finds it, filters the row slider by
-it, and puts the row's label in the chart title.
+- Join previews colour left columns blue, right columns orange, and shared keys
+  purple, with a visible legend. Key selections survive pipeline refreshes when
+  their columns still exist.
+- Saving a Join switches to Select with all result columns selected, preventing
+  the next preview from repeating the same join accidentally.
+- Select shows **Input rows** and **Distinct rows** beside Ascending. Distinct
+  counts use the selected columns and calculations, before Limit and Offset.
+- **Inspect a column → Encode categories** displays a category-to-code mapping
+  and supports individual plots, scatter comparisons, and two curves versus
+  samples. Codes follow first appearance in the full source and remain stable
+  when changing the inspection range. Missing values stay missing; source data
+  is unchanged. Codes are labels, so their distances and averages have no
+  statistical interpretation.
+- Green **Run pipeline** and blue preview buttons distinguish saved-pipeline
+  execution from the current settings. Fill value appears beside Action.
+- `examples/data/test_table1.csv` and `test_table2.csv` demonstrate all four joins;
+  select `order_id` as the key in both tables.
+
+## Preview and save steps
+
+| Control | Behaviour |
+|---|---|
+| **Apply and preview result** | Apply the current tab settings to the current pipeline input, without saving a step. |
+| **Add step** | Save the current operation and use its result as the input for the next operation. |
+| **Preview up to this step** | Run saved steps from the beginning through the highlighted step. |
+| **Run pipeline** | Run all saved steps, ignoring unsaved tab settings. |
+| **Edit step** | Restore a saved step's tab and settings; use Save changes or Cancel edit afterward. |
+
+Selecting an entry in the step list highlights it; use **Edit step** to restore
+its settings. Previews do not change the original source tables. After installing
+an update, restart the notebook kernel and rerun the launcher to replace an old GUI.
 
 ## Install
 
-Install the local 0.4.0 release from the project folder:
+Install the local 0.5.0 release from the project folder:
 
 ```bash
-python -m pip install dist/tablelab-0.4.0-py3-none-any.whl
+python -m pip install dist/tablelab-0.5.0-py3-none-any.whl
 ```
 
-In a notebook, use `%pip install /full/path/to/tablelab-0.4.0-py3-none-any.whl`
+In a notebook, use `%pip install /full/path/to/tablelab-0.5.0-py3-none-any.whl`
 in the selected kernel, then restart it. Launch the query GUI with:
 
 ```python

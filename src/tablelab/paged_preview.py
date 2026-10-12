@@ -5,10 +5,36 @@ import ipywidgets as widgets
 from IPython.display import HTML
 
 
-def table_preview_html(df, selected_column=None):
+JOIN_COLORS = {'left': '#dceeff', 'right': '#ffe4cc', 'both': '#e7ddf5'}
+
+
+def join_column_origins(left_columns, right_columns, left_keys, right_keys):
+    """Match pandas merge's suffixes and shared-key projection."""
+    common = {left for left, right in zip(left_keys, right_keys) if left == right}
+    overlap = (set(left_columns) & set(right_columns)) - common
+    origins = {f'{column}_left' if column in overlap else column:
+               'both' if column in common else 'left' for column in left_columns}
+    origins.update({f'{column}_right' if column in overlap else column: 'right'
+                    for column in right_columns if column not in common})
+    return origins
+
+
+def table_preview_html(df, selected_column=None, column_origins=None):
     """Keep column headers visible inside a scrollable notebook preview."""
     scope = "tablelab-selected-" + uuid.uuid4().hex
     shading = ""
+    legend = ''
+    if column_origins:
+        for position, column in enumerate(df.columns):
+            origin = column_origins.get(column)
+            if origin in JOIN_COLORS:
+                cell = len(df.columns) - position
+                shading += (f'.{scope} tr > :nth-last-child({cell}) '
+                            f'{{ background: {JOIN_COLORS[origin]}; color: #222; }}')
+        legend = ('<div>Column origin: ' + ' · '.join(
+            f'<span style="background:{JOIN_COLORS[origin]};color:#222;padding:2px 6px">{label}</span>'
+            for origin, label in [('left', 'Left table'), ('right', 'Right table'),
+                                  ('both', 'Shared join key')]) + '</div>')
     if selected_column is not None:
         for position, column in enumerate(df.columns):
             if column == selected_column:
@@ -25,7 +51,7 @@ def table_preview_html(df, selected_column=None):
     background: var(--jp-layout-color0, white);
     color: var(--jp-ui-font-color1, #222);
 }
-</style><div class="tablelab-table-preview """ + scope + '">' + df.to_html() + "</div>")
+</style>""" + legend + '<div class="tablelab-table-preview ' + scope + '">' + df.to_html() + "</div>")
 
 
 class PagedTablePreview:
