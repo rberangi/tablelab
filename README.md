@@ -1,6 +1,6 @@
 # tablelab
 
-Current release: **0.5.0**.
+Current release: **0.6.0**.
 
 TableLab is a notebook GUI for exploring and transforming tables. Select columns,
 filter rows, join tables, create grouped summaries, handle missing values, and
@@ -10,7 +10,14 @@ export pandas, PySpark, or SQL code from the same settings.
 Start with `examples/tablelab_queries.ipynb` or launch `query_main()` below.
 The separate `main()` API remains available for column and row chart inspection.
 
-## New in 0.5.0
+## New in 0.6.0
+
+- Independent **Inspect a row** panel with row navigation, a column/value table
+  highlighting missing values, and numeric bar or values-versus-columns plots.
+- Select numeric columns to plot; dense plots show at most ten evenly spaced
+  column labels while retaining all selected values.
+
+## Features introduced in 0.5.0
 
 - Join previews colour left columns blue, right columns orange, and shared keys
   purple, with a visible legend. Key selections survive pipeline refreshes when
@@ -32,6 +39,13 @@ The separate `main()` API remains available for column and row chart inspection.
 
 ## Preview and save steps
 
+**Inspect a row** is a separate collapsible source-data panel with a row number
+(starting at 1), Previous/Next navigation, and a column/value table highlighting
+missing values. Choose **Numeric bars** for comparable numeric columns or
+**Values vs columns** when columns represent ordered samples. Select which numeric
+columns to plot. This panel is independent of the source viewer and column
+inspector, and does not change queries or source data.
+
 | Control | Behaviour |
 |---|---|
 | **Apply and preview result** | Apply the current tab settings to the current pipeline input, without saving a step. |
@@ -46,13 +60,13 @@ an update, restart the notebook kernel and rerun the launcher to replace an old 
 
 ## Install
 
-Install the local 0.5.0 release from the project folder:
+Install the local 0.6.0 release from the project folder:
 
 ```bash
-python -m pip install dist/tablelab-0.5.0-py3-none-any.whl
+python -m pip install dist/tablelab-0.6.0-py3-none-any.whl
 ```
 
-In a notebook, use `%pip install /full/path/to/tablelab-0.5.0-py3-none-any.whl`
+In a notebook, use `%pip install /full/path/to/tablelab-0.6.0-py3-none-any.whl`
 in the selected kernel, then restart it. Launch the query GUI with:
 
 ```python

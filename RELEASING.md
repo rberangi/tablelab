@@ -5,7 +5,7 @@ TableLab's version is defined once, in `src/tablelab/__init__.py` as
 The GUI, Python API, and command-line `--version` use the same value.
 
 Use `MAJOR.MINOR.PATCH`: increment PATCH for fixes, MINOR for compatible features,
-and MAJOR for incompatible public API changes. The current release is **0.5.0**;
+and MAJOR for incompatible public API changes. The current release is **0.6.0**;
 the package remains in the 0.x development series.
 
 ## Prepare a release
@@ -29,17 +29,17 @@ the package remains in the 0.x development series.
 
    ```bash
    python -m build
-   python -m twine check dist/tablelab-0.5.0-py3-none-any.whl dist/tablelab-0.5.0.tar.gz
+   python -m twine check dist/tablelab-0.6.0-py3-none-any.whl dist/tablelab-0.6.0.tar.gz
    ```
 
-   Replace `0.5.0` in commands with the version being released. Keep earlier
+   Replace `0.6.0` in commands with the version being released. Keep earlier
    artifacts if useful; validate and distribute the explicit new filenames.
 
 6. Install the wheel into a separate environment and check both GUIs:
 
    ```bash
    python -m venv /tmp/tablelab-release-check
-   /tmp/tablelab-release-check/bin/python -m pip install dist/tablelab-0.5.0-py3-none-any.whl
+   /tmp/tablelab-release-check/bin/python -m pip install dist/tablelab-0.6.0-py3-none-any.whl
    /tmp/tablelab-release-check/bin/python -m tablelab --version
    /tmp/tablelab-release-check/bin/python -c 'from tablelab import QueryApp, TableApp; QueryApp(); TableApp(zoom=False)'
    ```
@@ -61,7 +61,7 @@ Commit and push `.github/workflows/python-package.yml`. On GitHub, open **Action
 Publish TableLab to PyPI → Run workflow**, select `main`, and run it. This builds,
 tests, and publishes the version currently in the source. Publishing a GitHub
 release also triggers the workflow when its tag contains this workflow; its tag
-must match the package version, such as `v0.5.0`.
+must match the package version, such as `v0.6.0`.
 
 Run publishing once per version. If that version already exists on PyPI, increment
 the version and prepare the next release first; PyPI does not allow overwriting files.

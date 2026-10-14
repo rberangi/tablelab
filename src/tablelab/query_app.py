@@ -251,6 +251,11 @@ class QueryApp:
         self.column_view = widgets.Accordion(children=[self._source_inspection], selected_index=None)
         self.column_view.set_title(0, "Inspect a column")
         self.column_view.observe(self._column_view_changed, names="selected_index")
+        self.row_inspector = None
+        self._row_inspection = widgets.VBox()
+        self.row_view = widgets.Accordion(children=[self._row_inspection], selected_index=None)
+        self.row_view.set_title(0, 'Inspect a row')
+        self.row_view.observe(self._row_view_changed, names='selected_index')
         self.code_target = widgets.Dropdown(
             description='Code output:', options=[('Pandas', 'pandas'), ('PySpark', 'pyspark'),
                                                  ('Spark SQL', 'sql'), ('MySQL 8+', 'mysql'),
@@ -264,7 +269,7 @@ class QueryApp:
             widgets.HTML(f"<b>TableLab {__version__}</b>"),
             widgets.HBox([browse, self.path, self.load_btn, self.upload]), self.picker.ui,
             widgets.HBox([self.source, self.save_btn, self.remove_btn]),
-            self.save_picker.ui, self.save_status, first_rows, self.column_view,
+            self.save_picker.ui, self.save_status, first_rows, self.column_view, self.row_view,
             self._tab_tooltip_style, self.tabs, self.pipeline_ui,
             widgets.HBox([self.run_btn, self.code_target, self.code_btn, self.copy_code_btn, self.keep_btn, self.result_name],
                           layout=widgets.Layout(flex_flow="row wrap", align_items="center")),
@@ -943,6 +948,18 @@ class QueryApp:
         if self.source_inspector is not None:
             self.source_inspector.set_active(active)
 
+    def _row_view_changed(self, change):
+        active = change['new'] == 0
+        if active and self.row_inspector is None:
+            from .row_inspector import RowInspector
+            self.row_inspector = RowInspector()
+            self._row_inspection.children = [self.row_inspector.ui]
+            entry = self._pipeline_source_entry
+            self.row_inspector.set_table(entry['df'] if entry is not None else None,
+                                         entry['name'] if entry is not None else 'Source table')
+        if self.row_inspector is not None:
+            self.row_inspector.set_active(active)
+
     def _source_changed(self):
         if self._updating:
             return
@@ -993,6 +1010,9 @@ class QueryApp:
         if self.source_inspector is not None and self.source_inspector.df is not base:
             name = self.tables[self.source.value]["name"] if df is not None else "Source table"
             self.source_inspector.set_table(base, name)
+        if self.row_inspector is not None and self.row_inspector.df is not base:
+            name = self._pipeline_source_entry['name'] if base is not None else 'Source table'
+            self.row_inspector.set_table(base, name)
         self._invalidate()
         if df is not None:
             self.status.value = f"Source: {len(df):,} rows × {len(df.columns):,} columns."

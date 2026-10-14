@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 — 2026-10-14
+
+- Independent row inspector with source row navigation and a column/value table highlighting missing values.
+- Numeric bars and values-versus-columns plots with selectable numeric columns.
+- Reduced plot label density, angled labels, and shortened long column names.
+
 ## 0.5.0 — 2026-10-12
 
 - Join preview colours and origin legend for left, right, and shared-key columns.
