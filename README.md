@@ -1,5 +1,4 @@
 # tablelab
-
 Current release: **0.6.0**.
 
 TableLab is a notebook GUI for exploring and transforming tables. Select columns,
